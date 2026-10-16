@@ -30,7 +30,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define FPSK_VERSION "0.1.0"
+#define FPSK_VERSION "0.2.0"
 
 static const double PI = 3.14159265358979323846;
 
@@ -90,7 +90,7 @@ struct fpsk_rx {
 
 const char *fpsk_version(void)
 {
-    return "fldigi-psk-core " FPSK_VERSION " contract=" FPSK_CONTRACT " abi=1";
+    return "fldigi-psk-core " FPSK_VERSION " contract=" FPSK_CONTRACT " abi=1 tx=1";
 }
 
 /*

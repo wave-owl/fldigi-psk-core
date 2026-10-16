@@ -1,6 +1,7 @@
 # fldigi-psk-core -- plain make, C99, no dependencies besides libm.
 #   make            static + shared library into $(BUILD)
-#   make test       build and run the C tests
+#   make test       build and run the C tests (receiver and transmitter)
+#   make sanitize   the C tests under AddressSanitizer + UndefinedBehaviorSanitizer
 #   make bench      CPU benchmark (60 min of audio per submode)
 #   make BUILD=/abs/dir shared   out-of-tree build (used by wave-owl)
 BUILD ?= build
@@ -19,7 +20,7 @@ else
   SHFLAGS = -shared -Wl,-soname,libfldigi_psk.so
 endif
 
-OBJ = $(BUILD)/psk_rx.o
+OBJ = $(BUILD)/psk_rx.o $(BUILD)/psk_tx.o
 
 all: static shared
 static: $(BUILD)/libfldigi_psk.a
@@ -28,7 +29,7 @@ shared: $(BUILD)/$(SHLIB)
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(BUILD)/psk_rx.o: src/psk_rx.c include/fldigi_psk.h | $(BUILD)
+$(BUILD)/%.o: src/%.c include/fldigi_psk.h | $(BUILD)
 	$(CC) $(CORE_FLAGS) $(CFLAGS) -c $< -o $@
 
 $(BUILD)/libfldigi_psk.a: $(OBJ)
@@ -40,8 +41,18 @@ $(BUILD)/$(SHLIB): $(OBJ)
 $(BUILD)/test_psk: tests/test_psk.c $(BUILD)/libfldigi_psk.a
 	$(CC) $(CORE_FLAGS) $(CFLAGS) $< $(BUILD)/libfldigi_psk.a -o $@ $(LDLIBS)
 
-test: $(BUILD)/test_psk
+$(BUILD)/test_psk_tx: tests/test_psk_tx.c $(BUILD)/libfldigi_psk.a
+	$(CC) $(CORE_FLAGS) $(CFLAGS) $< $(BUILD)/libfldigi_psk.a -o $@ $(LDLIBS)
+
+test: $(BUILD)/test_psk $(BUILD)/test_psk_tx
 	$(BUILD)/test_psk tests/golden
+	$(BUILD)/test_psk_tx tests/golden
+
+SAN_FLAGS = -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all
+
+sanitize:
+	$(MAKE) --no-print-directory BUILD=$(BUILD)/san CFLAGS="$(SAN_FLAGS)" \
+		LDLIBS="$(LDLIBS) $(SAN_FLAGS)" test
 
 $(BUILD)/bench_psk: tests/bench_psk.c $(BUILD)/libfldigi_psk.a
 	$(CC) $(CORE_FLAGS) $(CFLAGS) $< $(BUILD)/libfldigi_psk.a -o $@ $(LDLIBS)
@@ -52,4 +63,4 @@ bench: $(BUILD)/bench_psk
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all static shared test bench clean
+.PHONY: all static shared test sanitize bench clean

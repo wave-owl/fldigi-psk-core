@@ -1,6 +1,7 @@
 /*
  * CPU benchmark of fldigi-psk-core: 60 minutes of 8 kHz audio per submode (the clean
- * golden vector looped), processed in 512-sample blocks with AFC on.
+ * golden vector looped), processed in 512-sample blocks with AFC on; then the transmitter:
+ * a 120 s PSK31 over rendered as 48 kHz analytic IQ (target < 0.5 s CPU).
  * Usage: bench_psk <golden_dir>
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -14,6 +15,38 @@
 #define RATE 8000
 #define MINUTES 60
 #define BLOCK 512
+#define TX_SECONDS 120
+
+/* CPU seconds to render a TX_SECONDS PSK31 over at 48 kHz IQ; negative on error. */
+static double bench_tx(void)
+{
+    fpsk_tx_config cfg = {48000, 31.25, 1000.0};
+    fpsk_tx *tx = fpsk_tx_create(&cfg);
+    size_t nbits = (size_t)(TX_SECONDS * 31.25), n, pos, k;
+    unsigned char *bits = malloc(nbits);
+    double *re, *im, cpu;
+    clock_t t0;
+
+    if (!tx || !bits)
+        return -1.0;
+    for (k = 0; k < nbits; k++)
+        bits[k] = (unsigned char)((k * 7 + k / 3) % 3 != 0);
+    n = (2 * fpsk_tx_preamble_symbols(tx) + nbits) * fpsk_tx_symbol_len(tx) + 2048 * 6;
+    re = malloc(n * sizeof *re);
+    im = malloc(n * sizeof *im);
+    if (!re || !im)
+        return -1.0;
+    t0 = clock();
+    pos = fpsk_tx_preamble(tx, re, im, n);
+    pos += fpsk_tx_bits(tx, bits, nbits, re + pos, im + pos, n - pos);
+    pos += fpsk_tx_postamble(tx, re + pos, im + pos, n - pos);
+    cpu = (double)(clock() - t0) / CLOCKS_PER_SEC;
+    fpsk_tx_destroy(tx);
+    free(bits);
+    free(re);
+    free(im);
+    return pos == n ? cpu : -1.0;
+}
 
 /* Load a little-endian int16 .s16 file scaled by 1/32768; NULL on error. */
 static double *load_s16(const char *path, size_t *n)
@@ -103,6 +136,12 @@ int main(int argc, char **argv)
         fpsk_rx_destroy(rx);
         free(vec);
         free(audio);
+    }
+    {
+        double cpu = bench_tx();
+        printf("TX PSK31 %d s over, 48 kHz IQ: %.3f s CPU (target < 0.5 s)\n", TX_SECONDS, cpu);
+        if (cpu < 0.0 || cpu >= 0.5)
+            status = 1;
     }
     return status;
 }

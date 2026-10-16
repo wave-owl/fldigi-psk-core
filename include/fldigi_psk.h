@@ -1,13 +1,15 @@
 /*
- * fldigi-psk-core: BPSK receiver for PSK31/63/125 after fldigi 4.2.13 psk::rx_process.
+ * fldigi-psk-core: BPSK receiver and transmitter for PSK31/63/125 after fldigi 4.2.13
+ * psk::rx_process and psk::tx_process.
  *
  * Copyright (C) 2026 Gerolf Ziegenhain, DG6FL
  * Derived from fldigi 4.2.13 (src/psk/psk.cxx, src/psk/pskcoeff.cxx),
  * Copyright (C) Dave Freese W1HKJ and the fldigi developers.
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Contract "psk-c1", ABI 1. Audio in (doubles), decided bits out (1 = no phase reversal,
- * 0 = reversal); the varicode step is left to the caller.
+ * Contract "psk-c1", ABI 1, capability tag "tx=1".
+ * RX: audio in (doubles), decided bits out (1 = no phase reversal, 0 = reversal).
+ * TX: bits in, audio or analytic IQ out. Varicode is left to the caller in both directions.
  */
 #ifndef FLDIGI_PSK_H
 #define FLDIGI_PSK_H
@@ -36,7 +38,7 @@ typedef struct fpsk_config {
 
 typedef struct fpsk_rx fpsk_rx;
 
-/* "fldigi-psk-core <x.y.z> contract=psk-c1 abi=1" */
+/* "fldigi-psk-core <x.y.z> contract=psk-c1 abi=1 tx=1" */
 const char *fpsk_version(void);
 
 /* NULL on invalid configuration or out of memory. */
@@ -67,6 +69,41 @@ double fpsk_rx_quality(const fpsk_rx *rx);
 
 /* Copy the taps of FPSK_FIR1 or FPSK_FIR2 into out (up to max); returns the tap count. */
 size_t fpsk_rx_taps(const fpsk_rx *rx, int which, double *out, size_t max);
+
+/*
+ * ---- Transmitter (capability tag "tx=1", fldigi 4.2.13 psk::tx_process) ----
+ *
+ * An over is fpsk_tx_preamble + fpsk_tx_bits (varicode bits, each codeword followed by
+ * "00") + fpsk_tx_postamble. Calls can be repeated; phase and previous symbol carry over,
+ * so splitting the bits over several calls gives the same samples as one call.
+ *
+ * Output modes of the rendering calls:
+ *   im == NULL: real audio exactly as fldigi tx_carriers, ival*cos(phi) + qval*sin(phi),
+ *               each symbol divided by its own peak |sample| (maxamp), peak 1.
+ *   im != NULL: analytic IQ, re = ival*cos(phi) + qval*sin(phi),
+ *               im = ival*sin(phi) - qval*cos(phi); no maxamp division (envelope peak 1),
+ *               so re is the real-mode output before the division. Only positive
+ *               frequencies (the carrier above 0 Hz).
+ * Each call writes whole symbols and returns the number of samples written; if max is too
+ * small for the complete request (or re is NULL) it writes nothing, returns 0 and leaves
+ * the state unchanged.
+ */
+typedef struct fpsk_tx fpsk_tx;
+typedef struct { int rate; double baud; double carrier_hz; } fpsk_tx_config;
+
+/* rate 8000|48000, baud 31.25|62.5|125, 0 <= carrier_hz < rate/2; otherwise NULL. */
+fpsk_tx *fpsk_tx_create(const fpsk_tx_config *cfg);
+void     fpsk_tx_destroy(fpsk_tx *tx);
+void     fpsk_tx_reset(fpsk_tx *tx);                /* fldigi tx_init: phase 0, prev (1,0) */
+size_t   fpsk_tx_symbol_len(const fpsk_tx *tx);     /* rate / baud */
+size_t   fpsk_tx_preamble_symbols(const fpsk_tx *tx);/* dcdbits: 32, 64, 128 */
+/* dcdbits phase reversals: dcdbits * symbol_len samples. */
+size_t   fpsk_tx_preamble(fpsk_tx *tx, double *re, double *im, size_t max);
+/* One symbol per bit (nonzero = 1 = keep phase, 0 = reverse): n * symbol_len samples. */
+size_t   fpsk_tx_bits(fpsk_tx *tx, const unsigned char *bits, size_t n,
+                      double *re, double *im, size_t max);
+/* dcdbits steady symbols + 2048*rate/8000 zeros. */
+size_t   fpsk_tx_postamble(fpsk_tx *tx, double *re, double *im, size_t max);
 
 #ifdef __cplusplus
 }
