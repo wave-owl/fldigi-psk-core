@@ -30,7 +30,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define FPSK_VERSION "0.2.0"
+#define FPSK_VERSION "0.2.1"
 
 static const double PI = 3.14159265358979323846;
 
@@ -147,7 +147,7 @@ static void raised_cosine_fir(double *h, int length)
  */
 static void windowed_sinc_fir(double *h, double fc, int length)
 {
-    double tmp[FIRLEN + 1], sum;
+    double tmp[FIRLEN + 1] = {0.0}, sum;
     double l2 = length / 2.0, k2 = 2.0 * PI * fc, k1 = 2.0 * PI / length;
     int i;
     for (i = 0; i <= length; i++) {

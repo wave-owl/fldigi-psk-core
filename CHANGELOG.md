@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Initialise the windowed-sinc scratch buffer so the `-Werror` sanitizer build passes with
+  GCC on Linux (`-Wmaybe-uninitialized` at `-O1`). No change in output.
+
 ## 0.2.0
 
 - Transmitter for PSK31/63/125 (BPSK) after fldigi 4.2.13 `psk::tx_process`: additive
