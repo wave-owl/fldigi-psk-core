@@ -249,6 +249,8 @@ The golden data (`tests/golden/`) is generated from a wave-owl checkout with
 `int16` (`.s16`, scaled by 1/32768) or `float64` (`.f64`) audio at 8 kHz, `expected.txt`
 (`name submode center_hz afc chunk(0=none) freq_hz snr_db file nbits bits_hex`, bits packed
 MSB first as `np.packbits`) and `taps_<submode>_fir1.txt` / `taps_<submode>_fir2.txt`.
+The `*_afc0` lines (since 0.3.0) freeze the same vectors with AFC off, decoded in one call by
+the 0.2.1 library, so that BPSK31/63/125 are frozen with AFC on and off (wave-owl INV-930).
 
 `tests/test_psk_tx <golden_dir>` renders the three fldigi TX reference vectors in real mode
 (8000 Hz, carrier 1500 Hz, scaled by `10^(-12/20)`, `lrint(x * 32767)`) and compares them with

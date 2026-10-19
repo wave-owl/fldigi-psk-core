@@ -11,7 +11,8 @@
 - Conformance with fldigi 4.2.13 itself: 119 overs TX sample-identical, 476 decodes RX
   byte-identical (clean, noisy, AFC, pilot), `tests/test_psk_v_fldigi`.
 - Version string `fldigi-psk-core 0.3.0 contract=psk-c1 abi=1 tx=1 variants=1 dsp=0.9.2`.
-  The BPSK31/63/125 bit API and its results are unchanged (all 0.2.1 goldens pass).
+  The BPSK31/63/125 bit API and its results are unchanged (all 0.2.1 goldens pass); the
+  goldens now also freeze AFC off (`*_afc0` in `tests/golden/expected.txt`, from 0.2.1).
 
 ## 0.2.1
 
