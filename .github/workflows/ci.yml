@@ -13,9 +13,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: dsp/ pin check
+        run: make check-dsp
       - name: Build
         run: make
-      - name: Test
+      - name: Test (BPSK goldens, PSK variants, fldigi goldens)
         run: make test
       - name: Test (ASan + UBSan)
         run: make sanitize
+      - name: Benchmark
+        run: make bench

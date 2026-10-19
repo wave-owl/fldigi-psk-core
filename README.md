@@ -1,10 +1,16 @@
 # fldigi-psk-core
 
-A small C99 BPSK library for PSK31, PSK63 and PSK125. The receiver takes audio samples and
-returns decided bits; the transmitter takes bits and returns audio or analytic IQ.
+A C99 library for the whole PSK family of fldigi 4.2.13, receiver and transmitter:
 
-It is a C port of [wave-owl](https://github.com/wave-owl/wave-owl)'s Python port of the
-fldigi 4.2.13 PSK receiver (`psk::rx_process`):
+- **BPSK31/63/125 bit API** (`fpsk_rx_*`, `fpsk_tx_*`, since 0.1.0/0.2.0): audio in, decided
+  bits out; bits in, audio or analytic IQ out. Varicode is left to the caller.
+- **PSK variants text API** (`fpsk_v_*`, since 0.3.0, capability tag `variants=1`): every
+  psk mode of fldigi 4.2.13 (QPSK, 8PSK with and without FEC, PSK-R, multi-carrier BPSK and
+  PSK-R, BPSK63F/250/500/1000, OFDM-500F/750F/3500, and BPSK31/63/125 again), text in and
+  out, a line-by-line port of fldigi's `psk` class. See [PSK variants](#psk-variants).
+
+The BPSK31/63/125 receiver is a C port of [wave-owl](https://github.com/wave-owl/wave-owl)'s
+Python port of the fldigi 4.2.13 PSK receiver (`psk::rx_process`):
 
 | Part | fldigi 4.2.13 source |
 |------|----------------------|
@@ -35,7 +41,11 @@ TX output sample for sample. It is used by wave-owl as its native PSK core.
 - Upstream: fldigi, <https://git.code.sf.net/p/fldigi/fldigi>, tag `v4.2.13`,
   commit `e7c3ab3709ad62a7d91829364eb48a05fa325c0d`
 - Mirror: <https://github.com/wave-owl/fldigi> (same tag and commit)
-- fldigi files: `src/psk/psk.cxx`, `src/psk/pskcoeff.cxx`
+- fldigi files: `src/psk/psk.cxx`, `src/psk/pskcoeff.cxx`, `src/psk/pskvaricode.cxx`,
+  `src/include/psk.h`, `src/globals/globals.cxx` (mode names); through the pinned
+  [fldigi-dsp-core](https://github.com/wave-owl/fldigi-dsp-core) submodule `dsp/`:
+  `src/filters/filters.cxx` (C_FIR_filter, sfft), `src/filters/viterbi.cxx`,
+  `src/mfsk/interleave.cxx`, `src/mfsk/mfskvaricode.cxx`
 - Python reference (receiver): wave-owl `src/modes/psk/demod.py` (removed after the switch to
   this library)
 - TX reference vectors: wave-owl `src/modes/psk/vectors/{psk31_cq,psk63_cq,psk125_pangram}.wav`,
@@ -113,15 +123,115 @@ small (or `re` is NULL) it writes nothing, returns 0 and keeps the state, so an 
 rendered in any number of calls with the same result. Varicode encoding (each codeword
 followed by `00`) is left to the caller.
 
+## PSK variants
+
+`src/psk_v_*.c` port the `psk` class of fldigi 4.2.13 for every psk mode. One engine, the
+per-mode parameters of fldigi's constructor in a table (`fpsk_v_submode_*`):
+
+| Part | fldigi 4.2.13 source |
+|------|----------------------|
+| Per-mode table: symbol length, rate (8000 or 16000 Hz), dcdbits, carriers, separation, QPSK/PSK-R/8PSK/xPSK, FEC, puncturing, interleaver depth, flush length, vestigial carrier | `src/psk/psk.cxx:362-1103` (one cited block per mode in `src/psk_v_common.c`) |
+| Receiver: NCO per carrier, fir1 + decimation, fir2, bit clock on the mean envelope | `psk.cxx:1996-2182`, `pskcoeff.cxx:203-312` |
+| `rx_symbol`: differential phase, QPSK/8PSK/xPSK/BPSK decisions, PSK-R soft bits, quality, DCD patterns, Gray-mapped soft 8PSK/xPSK | `psk.cxx:1480-1831` |
+| FEC: `rx_qpsk` (K=5), `rx_pskr` (two de-interleavers and decoders voting by metric; K=7, 13, 15, 16) | `psk.cxx:1191-1293`, `psk.cxx:977-1040` |
+| Varicode: `rx_bit`/`rx_bit2` (PSK and MFSK varicode) | `psk.cxx:1116-1189`, `pskvaricode.cxx:292-340` |
+| AFC: `phaseafc`, `vestigial_afc`, `afc` | `psk.cxx:1389-1478` |
+| Transmitter: `tx_init`, shape, `tx_carriers` (Gray maps, 16-point map, pilot), `tx_symbol`, `tx_bit`, `tx_xpsk`, `tx_char`, `tx_flush`, `clearbits`, preamble and idle of `tx_process` | `psk.cxx:196-234`, `1045-1057`, `2193-2652` |
+
+Shared DSP comes from `dsp/` (fldigi-dsp-core, pinned by `dsp.lock` and checked by
+`tools/check_dsp.sh` before every build): `fdsp_firh` (C_FIR_filter), `fdsp_sfft`,
+`fdsp_viterbi`/`fdsp_encoder` (K up to 16), `fdsp_interleave`, `fdsp_mfsk_varienc/varidec`,
+`fdsp_decayavg`, `fdsp_sincos`.
+
+```c
+#include "fldigi_psk.h"
+
+fpsk_v_rx_config rc = { .submode = "8PSK125F", .carrier_hz = 1500 };   /* afc, squelch off */
+fpsk_v_rx *rx = fpsk_v_rx_create(&rc);       /* 16000 Hz for 8PSK and OFDM, else 8000 Hz */
+unsigned char text[256];
+size_t n = fpsk_v_rx_process(rx, audio, nsamples, text, sizeof text);
+
+fpsk_v_tx_config tc = { .submode = "QPSK31", .carrier_hz = 1500, .rate = 48000 };
+fpsk_v_tx *tx = fpsk_v_tx_create(&tc);
+size_t b = fpsk_v_tx_bound(tx), pos = 0;     /* every call needs max >= b */
+pos += fpsk_v_tx_begin(tx, re + pos, im + pos, max - pos);       /* preamble */
+for (const char *p = "CQ DE DG6FL"; *p; p++)
+    pos += fpsk_v_tx_put(tx, (unsigned char)*p, re + pos, im + pos, max - pos);
+pos += fpsk_v_tx_end(tx, re + pos, im + pos, max - pos);          /* postamble + zeros */
+```
+
+| Function | Purpose |
+|----------|---------|
+| `fpsk_v_submode_count/at/find` | The 56 psk modes of fldigi (`name` = fldigi's short name such as `QPSK31`, `8PSK125F`, `PSK63RC4`, `PSK125C12`, `OFDM500F`; `label` = fldigi's long name such as `4xPSK63R`; `adif`; rate, symbol length, carriers, FEC, `sc_bw`, `bandwidth`, `baud`) |
+| `fpsk_v_rx_create(cfg)` | Submode, carrier (fldigi's centre frequency; NULL outside fldigi's range `bandwidth/2 .. 3000 - bandwidth/2`, 4000 Hz for OFDM-3500), `afc`, `squelch_on`/`squelch`, `reverse` (QPSK), `pilot` (fldigi's PSKPILOT) |
+| `fpsk_v_rx_process(rx, x, n, text, max)` | Audio at the submode rate (int16 / 32768 scale); returns the bytes fldigi hands to `put_rx_char()`. The audio is cut into fldigi's 512-sample sound card blocks counted across calls, so the result does not depend on the call sizes |
+| `fpsk_v_rx_reset/carrier_hz/set_carrier/metric/dcd/dropped/footprint` | State, AFC carrier, fldigi's metric and DCD, dropped bytes, bytes allocated |
+| `fpsk_v_tx_create(cfg)` | Submode, carrier, rate (0 or the submode rate: fldigi's samples; 48000: the same symbols at 48 kHz), `reverse`, `pilot` |
+| `fpsk_v_tx_begin/put/idle/end(tx, re, im, max)` | One `tx_process` step each: `tx_init` + preamble, one character, fldigi's idle with an empty buffer, `tx_flush` + 2048 zeros (scaled with the rate). `im == NULL`: fldigi's real audio, each symbol divided by its own peak; `im != NULL`: analytic IQ of the same symbols (no peak division, envelope <= 1). Refuses (returns 0, no state change) when `max < fpsk_v_tx_bound()` |
+
+Output before fldigi's TX level: multiply by `10^(-12/20)` to reproduce fldigi's WAV.
+
+### fldigi behaviour kept on purpose
+
+- `sc_bw = samplerate / symbollen` in integer arithmetic (`psk.cxx:1060`): PSK63-based
+  multi-carrier modes are spaced 1.4 x 62 Hz, not 1.4 x 62.5 Hz; the 8PSK1200F `sc_bw` is
+  1230 Hz.
+- The carriers are taken once per `rx_process` call (`psk.cxx:2011-2016`), so an AFC step
+  takes effect at the next 512-sample block.
+- OFDM-500F/750F run fldigi's vestigial AFC on carrier 0 whether or not AFC is on
+  (`psk.cxx:1470-1473`). Without a pilot it locks onto the data carrier and detunes the
+  receiver: fldigi 4.2.13 cannot decode its own OFDM-500F, and OFDM-750F only part of an
+  over. The port decodes exactly the same bytes. fldigi 4.2.13 has the OFDM modes disabled
+  (`init_modem`, `fl_digi.cxx:1971-1982`).
+- OFDM-3500 is 3250 Hz wide; with fldigi's default 3000 Hz waterfall the carrier clamp range
+  is empty and fldigi moves the carrier to 1375 Hz (no decode). The port uses fldigi's
+  4000 Hz waterfall setting for it (carrier 2250 Hz, as fldigi's `init()` sets it).
+- QPSK31's flush (32 zero bits, `psk.cxx:2509-2512`) is shorter than the K=5 decoder delay:
+  fldigi loses the last character of a QPSK31 over, and so does the port.
+- With squelch off fldigi prints whatever its DCD lets through, including decoded
+  preambles and postambles (8PSK FEC, PSK-R); the port prints the same bytes.
+- Each over starts from the state of a freshly started fldigi (`fpsk_v_tx_begin`): fldigi
+  keeps the static bit accumulators of `tx_bit`/`tx_xpsk` and the QPSK encoder between overs.
+
+Not ported (display or PSKmail only): the PSK viewer, signal search, S/N and IMD Goertzel
+bins, phase scope, IMD test shape, soft start (`softPSK`, off by default).
+
+### Conformance with fldigi 4.2.13
+
+`tests/test_psk_v_fldigi` checks the port against fldigi itself
+(`tests/golden/variants/`, made by `make_fldigi_golden.py` with the headless fldigi bench of
+wave-owl, see `BUILD.md` there, plus `fldigi-bench-ofdm.patch`, which only enables the OFDM
+case of `init_modem`): 56 modes x 2 texts (`CQ CQ DE DG6FL DG6FL K` and a pangram) + 7 AFC
+and pilot overs. On the reference platform (macOS arm64):
+
+- TX: 119 of 119 overs sample-identical with fldigi (same length, same FNV-1a hash of the
+  int16 output);
+- RX: 476 of 476 decodes (clean, -5, -10, -15 dB in 2500 Hz, AFC and pilot cases)
+  byte-identical with fldigi's own decode.
+
+Off the reference platform (another libm, no FMA) the text must be recovered with at most
+1 + 5 % more errors than fldigi's decode (clean) and within 20 % + 10 errors in total
+(noisy); the sanitizer build runs this mode.
+
+### CPU and memory (`make bench`, Apple Silicon, -O3)
+
+Receiver, 60 s of audio per submode, 512-sample blocks, AFC on: at most 1.9 % of one core
+(8PSK250F, two K=16 decoders), below 0.6 % for all modes without K=16. Memory per receiver
+below 1.6 MB for every submode except 8PSK125F/8PSK250F (3.0 MB, two K=16 decoders; fldigi
+needs 128 MB for them). fldigi-dsp-core 0.9 stores the Viterbi decisions as bits and the FIR
+history in short buffers; the results are identical to fldigi's tables.
+
 ## Build
 
-Plain `make`, C99, no dependencies besides `libm`:
+Plain `make`, C99, no dependencies besides `libm` and the `dsp/` submodule
+(`git submodule update --init --recursive`):
 
 ```sh
 make                          # static + shared library into build/
-make test                     # build and run tests/test_psk and tests/test_psk_tx
+make test                     # tests/test_psk, test_psk_tx, test_psk_v, test_psk_v_fldigi
 make sanitize                 # the same tests under ASan + UBSan
-make bench                    # CPU: 60 min of 8 kHz audio per submode, 120 s PSK31 TX over
+make bench                    # BPSK31/63/125 (60 min each) and every variant (60 s each)
+make check-dsp                # only the dsp/ pin check
 make BUILD=/abs/dir shared    # out-of-tree shared library (used by wave-owl)
 ```
 
@@ -149,11 +259,18 @@ configurations, symbol lengths and `dcdbits`, the "max too small" case and the v
 `tests/golden/tx/` (`<name>.s16` fldigi samples, `<name>.bits` varicode bits) is generated with
 `tests/golden/make_tx_golden.py /path/to/wave-owl`.
 
+`tests/test_psk_v` checks the variants table, the PSK varicode, the loopback of every
+submode (AC-930.1), chunk invariance and reset, the TX bound contract, IQ against real
+output at 48 kHz and invalid configurations.
+
 ## Notes
 
-- Compiled with `-ffp-contract=off` (no implicit fused multiply-add) so that the arithmetic
-  follows the reference order; sums and complex magnitudes reproduce numpy's pairwise sum
-  and `abs()` bit for bit.
+- The BPSK31/63/125 bit API (`psk_rx.c`, `psk_tx.c`) is compiled with `-ffp-contract=off`
+  (no implicit fused multiply-add) so that the arithmetic follows the reference order; sums
+  and complex magnitudes reproduce numpy's pairwise sum and `abs()` bit for bit. The
+  variants (`psk_v_*.c`) and `dsp/` are compiled with `-ffp-contract=on`, as fldigi's
+  reference build (Apple clang -O2) is; `std::complex` products are separate statements as
+  in libc++, never fused.
 - Performance (`make bench`, Apple Silicon, `-O3`, 512-sample blocks, AFC on): about 0.6 s
   (PSK31), 0.9 s (PSK63) and 1.5 s (PSK125) CPU per hour of audio. Rendering a 120 s PSK31
   over as 48 kHz IQ takes about 0.05 s.

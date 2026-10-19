@@ -30,8 +30,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define FPSK_VERSION "0.2.1"
-
 static const double PI = 3.14159265358979323846;
 
 /* fldigi's FIR length (FIRLEN = 64, src/include/pskcoeff.h:24). */
@@ -87,11 +85,6 @@ struct fpsk_rx {
     double sig, noise;
     long nsym;
 };
-
-const char *fpsk_version(void)
-{
-    return "fldigi-psk-core " FPSK_VERSION " contract=" FPSK_CONTRACT " abi=1 tx=1";
-}
 
 /*
  * numpy's pairwise sum (numpy/_core/src/umath/loops_utils.h.src) for n <= 128: eight
