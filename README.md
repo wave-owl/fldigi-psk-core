@@ -276,3 +276,12 @@ output at 48 kHz and invalid configurations.
 - Performance (`make bench`, Apple Silicon, `-O3`, 512-sample blocks, AFC on): about 0.6 s
   (PSK31), 0.9 s (PSK63) and 1.5 s (PSK125) CPU per hour of audio. Rendering a 120 s PSK31
   over as 48 kHz IQ takes about 0.05 s.
+
+<!-- wave-owl-source-sbom-docs:start -->
+## Source SBOMs
+
+Every published release, including prereleases, receives automatically generated
+CycloneDX JSON and readable documentation. See the [initial source report](SBOM.md),
+[CycloneDX JSON](SBOM.cdx.json) and [release policy](SBOM-POLICY.md) for scope,
+release assets, provenance declarations and reproduction instructions.
+<!-- wave-owl-source-sbom-docs:end -->
